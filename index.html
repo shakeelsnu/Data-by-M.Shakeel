@@ -91,7 +91,7 @@
   <p class="author">by Shakeel</p>
   
   <!-- User Authentication Section -->
-  <div id="userAuth">
+  <div id="userAuth" class="hidden">
     <h3>👤 Please Enter Your Name to Continue</h3>
     <input type="text" id="userName" placeholder="Enter your name (letters only)..." />
     <div id="nameError" class="error hidden">Please enter a valid name (letters only, no numbers or special characters)</div>
@@ -99,7 +99,7 @@
     <button onclick="toggleAdminLogin()">Admin Mode</button>
   </div>
   
-  <div id="mainContent" class="hidden">
+  <div id="mainContent">
     <p id="timestamp">Page loaded: <span id="lastUpdated"></span></p>
     
     <!-- File Selection Section -->
@@ -146,11 +146,12 @@
       <p id="perTermMatches"></p>
       <h3>🔎 Search Results</h3>
       
-      <div id="resultText"></div>
+      <!-- Moved export buttons above the results table -->
       <div id="exportButtons" style="margin-top: 15px;">
         <button onclick="exportToExcel()">📊 Export to Excel</button>
-        <button onclick="showColumnCustomizer()">⚙️ Customize Columns</button>
+        <button onclick="exportToCsv()">📝 Export to CSV</button>
         <button onclick="printResults()">🖨️ Download as PDF</button>
+        <button onclick="showColumnCustomizer()">⚙️ Customize Columns</button>
       </div>
 
       <div id="columnCustomizer" class="column-customizer hidden">
@@ -159,7 +160,8 @@
         <button onclick="applyColumnVisibility()">Apply</button>
         <button onclick="showAllColumns()">Show All</button>
       </div>
-
+      
+      <div id="resultText"></div>
     </div>
   </div>
 
@@ -644,12 +646,13 @@
       // After loading data, populate the column selector. Pass the last selected column.
       if (excelData.length > 0) {
         const headers = Object.keys(excelData[0]).filter(key => key !== '__sourceFile');
+        currentHeaders = headers;
+        visibleColumns = headers.slice(); // Set all columns to be visible by default
         populateColumnSelector(headers, lastSelectedColumn);
-        // Initialize visible columns
-        visibleColumns = headers.slice();
       } else {
-        populateColumnSelector([]);
+        currentHeaders = [];
         visibleColumns = [];
+        populateColumnSelector([]);
       }
     }
 
@@ -812,7 +815,7 @@
         return;
       }
 
-      // Create the table structure
+      // Create a temporary table with the visible columns and data
       const table = document.createElement("table");
       table.id = "searchResultsTable";
       const thead = document.createElement("thead");
@@ -913,6 +916,49 @@
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Search Results");
       XLSX.writeFile(workbook, "search_results.xlsx");
+    }
+
+    function exportToCsv() {
+        if (currentResults.length === 0) {
+            showCustomAlert("No search results to export.");
+            return;
+        }
+
+        const data = currentResults.map(row => {
+          const newRow = {};
+          visibleColumns.forEach(header => {
+            const cellContent = row[header] || '';
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = cellContent;
+            newRow[header] = tempDiv.textContent || tempDiv.innerText;
+          });
+          return newRow;
+        });
+
+        // Convert data to CSV string
+        const headers = visibleColumns;
+        let csvContent = headers.join(',') + '\n';
+        data.forEach(row => {
+            const rowValues = headers.map(header => {
+                const value = row[header];
+                // Handle commas and quotes in values
+                if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+                    return `"${value.replace(/"/g, '""')}"`;
+                }
+                return value;
+            });
+            csvContent += rowValues.join(',') + '\n';
+        });
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', 'search_results.csv');
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 
     function printResults() {
