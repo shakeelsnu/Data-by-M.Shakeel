@@ -48,27 +48,59 @@
     .search-options > div { margin-right: 20px; }
     .search-options label { margin-left: 5px; }
 
-    /* New styles for column customization */
+    /* Styles for the compact column customization panel */
     .column-customizer {
         margin-top: 15px;
-        padding: 10px;
+        padding: 15px;
         border: 1px solid #ccc;
-        border-radius: 5px;
-        background-color: #f0f0f0;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        justify-content: center;
+        border-radius: 8px;
+        background-color: #f9f9f9;
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+        max-width: 700px; /* Constrain width */
+        margin-left: auto; /* Center it */
+        margin-right: auto;
+    }
+    .column-customizer p {
+        width: 100%; /* Make the title span the full width */
+        text-align: left;
+        margin: 0 0 10px 0;
+    }
+    #columnCheckboxes {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); /* Responsive columns */
+        gap: 8px;
+        width: 100%;
     }
     .column-customizer label {
         display: flex;
         align-items: center;
         gap: 5px;
         white-space: nowrap;
+        font-size: 0.9em;
+        background-color: #fff;
+        padding: 5px 10px;
+        border-radius: 5px;
+        border: 1px solid #e0e0e0;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+    .column-customizer label:hover {
+        background-color: #e9ecef;
+    }
+    .panel-controls {
+        display: flex;
+        justify-content: flex-end;
+        width: 100%;
+        margin-top: 15px;
+        gap: 10px;
     }
     .column-customizer button {
-        margin-left: auto;
+        /* Reset any conflicting styles */
+        margin-left: 0; 
+        padding: 8px 12px;
+        font-size: 0.9em;
     }
+
     .print-only {
         display: none;
     }
@@ -146,21 +178,25 @@
       <p id="perTermMatches"></p>
       <h3>🔎 Search Results</h3>
       
-      <!-- Moved export buttons above the results table -->
+      <!-- Customization and export buttons appear above the results table -->
       <div id="exportButtons" style="margin-top: 15px;">
         <button onclick="exportToExcel()">📊 Export to Excel</button>
         <button onclick="exportToCsv()">📝 Export to CSV</button>
         <button onclick="printResults()">🖨️ Download as PDF</button>
-        <button onclick="showColumnCustomizer()">⚙️ Customize Columns</button>
+        <button id="customizeBtn" onclick="toggleColumnCustomizer()">⚙️ Customize Columns</button>
       </div>
 
+      <!-- This panel is toggled by the "Customize Columns" button -->
       <div id="columnCustomizer" class="column-customizer hidden">
         <p><strong>Select columns to display:</strong></p>
         <div id="columnCheckboxes"></div>
-        <button onclick="applyColumnVisibility()">Apply</button>
-        <button onclick="showAllColumns()">Show All</button>
+        <div class="panel-controls">
+          <button onclick="showAllColumns()">Show All</button>
+          <button onclick="applyColumnVisibility()">Apply</button>
+        </div>
       </div>
       
+      <!-- The search results table will be rendered inside this div -->
       <div id="resultText"></div>
     </div>
   </div>
@@ -1031,51 +1067,61 @@
       document.body.appendChild(modal);
     }
 
-    function showColumnCustomizer() {
+    // This function toggles the visibility of the column customizer.
+    // It also updates the button text to reflect the current action.
+    function toggleColumnCustomizer() {
       const customizer = document.getElementById('columnCustomizer');
-      const checkboxesDiv = document.getElementById('columnCheckboxes');
-      checkboxesDiv.innerHTML = '';
+      const customizeBtn = document.getElementById('customizeBtn');
       
-      if (currentHeaders.length === 0) {
-        checkboxesDiv.innerHTML = "<p>No headers available. Perform a search first.</p>";
-        customizer.classList.remove('hidden');
-        return;
+      const isNowVisible = !customizer.classList.toggle('hidden');
+
+      if (isNowVisible) {
+        customizeBtn.innerHTML = 'Hide Options ▲'; // Panel is visible, so the button's action is to hide it.
+        
+        const checkboxesDiv = document.getElementById('columnCheckboxes');
+        checkboxesDiv.innerHTML = '';
+        
+        if (currentHeaders.length === 0) {
+          checkboxesDiv.innerHTML = "<p>No headers available. Perform a search first.</p>";
+          return;
+        }
+
+        currentHeaders.forEach(header => {
+          const label = document.createElement('label');
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.value = header;
+          input.checked = visibleColumns.includes(header);
+          label.appendChild(input);
+          label.append(header);
+          checkboxesDiv.appendChild(label);
+        });
+      } else {
+        customizeBtn.innerHTML = '⚙️ Customize Columns'; // Panel is hidden, so the button's action is to show it.
       }
-
-      currentHeaders.forEach(header => {
-        const label = document.createElement('label');
-        const input = document.createElement('input');
-        input.type = 'checkbox';
-        input.value = header;
-        input.checked = visibleColumns.includes(header);
-        label.appendChild(input);
-        label.append(header);
-        checkboxesDiv.appendChild(label);
-      });
-
-      customizer.classList.remove('hidden');
     }
 
     function applyColumnVisibility() {
       const checkboxes = document.querySelectorAll('#columnCheckboxes input[type="checkbox"]');
-      visibleColumns = [];
+      const newVisibleColumns = [];
       checkboxes.forEach(checkbox => {
         if (checkbox.checked) {
-          visibleColumns.push(checkbox.value);
+          newVisibleColumns.push(checkbox.value);
         }
       });
       
-      if (visibleColumns.length === 0) {
-        showCustomAlert("You must have at least one column visible.");
-        // Revert to old state
-        visibleColumns = currentHeaders;
-        renderResults(currentResults, currentHeaders);
-        document.getElementById('columnCustomizer').classList.add('hidden');
-        return;
+      if (newVisibleColumns.length === 0) {
+        showCustomAlert("You must select at least one column to display.");
+        return; // Keep the panel open for the user to correct the selection
       }
       
+      visibleColumns = newVisibleColumns;
       renderResults(currentResults, currentHeaders);
+      
+      // Hide the customizer panel upon successful application
       document.getElementById('columnCustomizer').classList.add('hidden');
+      // Also update the button text back to its default state
+      document.getElementById('customizeBtn').innerHTML = '⚙️ Customize Columns';
     }
 
     function showAllColumns() {
@@ -1151,3 +1197,4 @@
   </script>
 </body>
 </html>
+
