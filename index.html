@@ -47,6 +47,43 @@
     .search-options { display: flex; align-items: center; margin: 10px 0; }
     .search-options > div { margin-right: 20px; }
     .search-options label { margin-left: 5px; }
+
+    /* New styles for column customization */
+    .column-customizer {
+        margin-top: 15px;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        background-color: #f0f0f0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+    }
+    .column-customizer label {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        white-space: nowrap;
+    }
+    .column-customizer button {
+        margin-left: auto;
+    }
+    .print-only {
+        display: none;
+    }
+    @media print {
+        body > *:not(.print-only) {
+            display: none;
+        }
+        .print-only {
+            display: block;
+        }
+        table, tr, th, td {
+            border: 1px solid black !important;
+        }
+        
+    }
   </style>
 </head>
 <body>
@@ -112,8 +149,17 @@
       <div id="resultText"></div>
       <div id="exportButtons" style="margin-top: 15px;">
         <button onclick="exportToExcel()">📊 Export to Excel</button>
+        <button onclick="showColumnCustomizer()">⚙️ Customize Columns</button>
         <button onclick="printResults()">🖨️ Download as PDF</button>
       </div>
+
+      <div id="columnCustomizer" class="column-customizer hidden">
+        <p><strong>Select columns to display:</strong></p>
+        <div id="columnCheckboxes"></div>
+        <button onclick="applyColumnVisibility()">Apply</button>
+        <button onclick="showAllColumns()">Show All</button>
+      </div>
+
     </div>
   </div>
 
@@ -177,6 +223,14 @@
       <button onclick="resetFileNicknames()" style="background-color: #ff6b6b;">🔄 Reset to Default</button>
     </div>
   </div>
+  
+  <!-- Print-only view -->
+  <div class="print-only">
+    <h2>Search Results</h2>
+    <p><strong>Query:</strong> <span id="printQuery"></span></p>
+    <p><strong>Total Matches:</strong> <span id="printMatches"></span></p>
+    <div id="printTableContainer"></div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <script>
@@ -196,6 +250,7 @@
     let sortDirection = 'asc';
     let selectedLogs = new Set();
     let currentHeaders = [];
+    let visibleColumns = [];
 
     // Load file nicknames from localStorage or initialize empty object
     function loadFileNicknames() {
@@ -224,7 +279,7 @@
       
       // Save to localStorage
       localStorage.setItem('fileNicknames', JSON.stringify(fileNicknames));
-      alert("File nicknames saved successfully!");
+      showCustomAlert("File nicknames saved successfully!");
       
       // Update the file dropdown
       updateFileDropdown();
@@ -232,13 +287,13 @@
 
     // Reset file nicknames to default (empty)
     function resetFileNicknames() {
-      if (confirm("Are you sure you want to reset all file nicknames to their default names?")) {
+      showCustomConfirm("Are you sure you want to reset all file nicknames to their default names?", () => {
         fileNicknames = {};
         localStorage.removeItem('fileNicknames');
         renderFileNicknameManager();
         updateFileDropdown();
-        alert("File nicknames have been reset to default.");
-      }
+        showCustomAlert("File nicknames have been reset to default.");
+      });
     }
 
     // Update the file selection dropdown with nicknames
@@ -276,6 +331,9 @@
       } else {
         selectedFilesElement.textContent = "No files selected";
       }
+      
+      // Automatically load the selected file
+      loadSelectedExcelFiles();
     }
 
     // Render the file nickname manager in the admin panel
@@ -326,7 +384,7 @@
       const password = document.getElementById('deletePassword').value.trim();
       
       if (password !== "9332") {
-        alert("Incorrect admin password. Deletion cancelled.");
+        showCustomAlert("Incorrect admin password. Deletion cancelled.");
         hideDeleteConfirmation();
         return;
       }
@@ -339,7 +397,7 @@
       // Update UI
       loadLogs();
       hideDeleteConfirmation();
-      alert("All logs have been deleted successfully.");
+      showCustomAlert("All logs have been deleted successfully.");
     }
 
     // Toggle selection of all logs
@@ -383,33 +441,31 @@
     // Delete selected logs
     function deleteSelectedLogs() {
       if (selectedLogs.size === 0) {
-        alert("Please select at least one log to delete.");
+        showCustomAlert("Please select at least one log to delete.");
         return;
       }
       
-      if (!confirm(`Are you sure you want to delete ${selectedLogs.size} log(s)? This action cannot be undone.`)) {
-        return;
-      }
-      
-      // Delete selected logs (in reverse order to avoid index issues)
-      const sortedIndexes = Array.from(selectedLogs).sort((a, b) => b - a);
-      sortedIndexes.forEach(index => {
-        userSessions.splice(index, 1);
+      showCustomConfirm(`Are you sure you want to delete ${selectedLogs.size} log(s)? This action cannot be undone.`, () => {
+        // Delete selected logs (in reverse order to avoid index issues)
+        const sortedIndexes = Array.from(selectedLogs).sort((a, b) => b - a);
+        sortedIndexes.forEach(index => {
+          userSessions.splice(index, 1);
+        });
+        
+        // Clear selection
+        selectedLogs.clear();
+        document.getElementById('selectAllLogs').checked = false;
+        
+        // Update UI
+        loadLogs();
+        showCustomAlert(`${sortedIndexes.length} log(s) have been deleted successfully.`);
       });
-      
-      // Clear selection
-      selectedLogs.clear();
-      document.getElementById('selectAllLogs').checked = false;
-      
-      // Update UI
-      loadLogs();
-      alert(`${sortedIndexes.length} log(s) have been deleted successfully.`);
     }
 
     // Export user logs as text file
     function exportUserLogs() {
       if (userSessions.length === 0) {
-        alert("No user logs available to export.");
+        showCustomAlert("No user logs available to export.");
         return;
       }
       
@@ -473,33 +529,23 @@
       currentUserLoginTime = new Date();
       userSearchCount = 0;
       userLastSearch = "";
-      
       document.getElementById("userAuth").classList.add("hidden");
       document.getElementById("mainContent").classList.remove("hidden");
       
       // Store user session
-      userSessions.push({
-        user: userName,
-        loginTime: currentUserLoginTime,
-        logoutTime: null,
-        searchCount: 0,
-        lastSearch: ""
-      });
+      userSessions.push({ user: userName, loginTime: currentUserLoginTime, logoutTime: null, searchCount: 0, lastSearch: "" });
       
       // Focus on search input for immediate use
       document.getElementById("searchInput").focus();
     }
-    
+
     function logout() {
       if (currentUserName && currentUserLoginTime) {
         const logoutTime = new Date();
         const duration = Math.round((logoutTime - currentUserLoginTime) / 1000); // in seconds
         
         // Update the user session with logout time
-        const currentSession = userSessions.find(session => 
-          session.user === currentUserName && session.logoutTime === null
-        );
-        
+        const currentSession = userSessions.find(session => session.user === currentUserName && session.logoutTime === null );
         if (currentSession) {
           currentSession.logoutTime = logoutTime;
           currentSession.duration = duration;
@@ -507,12 +553,10 @@
           currentSession.lastSearch = userLastSearch;
         }
       }
-      
       currentUserName = "";
       currentUserLoginTime = null;
       userSearchCount = 0;
       userLastSearch = "";
-      
       document.getElementById("userAuth").classList.remove("hidden");
       document.getElementById("mainContent").classList.add("hidden");
       document.getElementById("adminLogin").classList.add("hidden");
@@ -523,15 +567,12 @@
 
     function toggleAdminLogin() {
       const adminLogin = document.getElementById("adminLogin");
-      
       if (adminLogin.classList.contains("hidden")) {
         // Show admin login - don't hide other content
         adminLogin.classList.remove("hidden");
-        
         // Clear previous inputs
         document.getElementById("adminUser").value = "";
         document.getElementById("adminPass").value = "";
-        
         // Focus on username field
         document.getElementById("adminUser").focus();
       } else {
@@ -539,7 +580,7 @@
         adminLogin.classList.add("hidden");
       }
     }
-    
+
     function hideAdminPanel() {
       document.getElementById("adminPanel").classList.add("hidden");
       hideDeleteConfirmation();
@@ -550,13 +591,10 @@
         // Use GitHub API to list files in the repository
         const response = await fetch("https://api.github.com/repos/shakeelsnu/EmpData-by-Shakeel/contents/");
         const files = await response.json();
-        
         // Filter for Excel files
         availableFiles = files.filter(f => f.name.endsWith(".xlsx"));
-        
         // Update the file selection dropdown
         updateFileDropdown();
-        
         return availableFiles;
       } catch (error) {
         console.error("Error loading available files:", error);
@@ -569,20 +607,16 @@
     async function loadSelectedExcelFiles(lastSelectedColumn = null) {
       const fileSelect = document.getElementById("fileSelect");
       const selectedValue = fileSelect.value;
-      
       if (!selectedValue) {
-        alert("Please select a file to search.");
-        return;
+        return; // Don't show an alert, just don't load anything.
       }
       
       // If "All Files" is selected
       const loadAll = selectedValue === "all";
-      
       const filesToLoad = loadAll ? availableFiles : availableFiles.filter(f => f.name === selectedValue);
-      
       excelData = [];
       let loadedNames = [];
-
+      
       for (const file of filesToLoad) {
         try {
           // Get the raw file content
@@ -600,370 +634,417 @@
           // Use nickname if available, otherwise use filename
           const displayName = fileNicknames[file.name] || file.name;
           loadedNames.push(displayName);
-        } catch (err) { 
-          console.error("Failed loading:", file.name, err); 
+        } catch (err) {
+          console.error("Failed loading:", file.name, err);
         }
       }
-
-      document.getElementById("excelUploadDate").innerText = loadedNames.length > 0 ? 
-        loadedNames.join(", ") + " loaded at " + new Date().toLocaleString() : 
-        "❌ No Excel files found or selected";
-
+      
+      document.getElementById("excelUploadDate").innerText = loadedNames.length > 0 ? loadedNames.join(", ") + " loaded at " + new Date().toLocaleString() : "❌ No Excel files found or selected";
+      
       // After loading data, populate the column selector. Pass the last selected column.
       if (excelData.length > 0) {
-          const headers = Object.keys(excelData[0]).filter(key => key !== '__sourceFile');
-          populateColumnSelector(headers, lastSelectedColumn);
+        const headers = Object.keys(excelData[0]).filter(key => key !== '__sourceFile');
+        populateColumnSelector(headers, lastSelectedColumn);
+        // Initialize visible columns
+        visibleColumns = headers.slice();
       } else {
-          populateColumnSelector([]);
+        populateColumnSelector([]);
+        visibleColumns = [];
       }
     }
 
     // populateColumnSelector now accepts the last selected column as a parameter
     function populateColumnSelector(headers, lastSelectedColumn) {
-        const columnSelect = document.getElementById("searchColumnSelect");
-        columnSelect.innerHTML = ""; // Clear existing options
-        if (headers.length > 0) {
-          let hasNumericColumn = false;
-          let defaultNumericColumn = null;
-          
-          // Find the first column with a numeric value
-          for (const header of headers) {
-              if (excelData.length > 0 && !isNaN(parseFloat(excelData[0][header]))) {
-                  defaultNumericColumn = header;
-                  hasNumericColumn = true;
-                  break;
-              }
+      const columnSelect = document.getElementById("searchColumnSelect");
+      columnSelect.innerHTML = ""; // Clear existing options
+      
+      if (headers.length > 0) {
+        let hasNumericColumn = false;
+        let defaultNumericColumn = null;
+        
+        // Find the first column with a numeric value
+        for (const header of headers) {
+          if (excelData.length > 0 && !isNaN(parseFloat(excelData[0][header]))) {
+            defaultNumericColumn = header;
+            hasNumericColumn = true;
+            break;
           }
-
-          headers.forEach(header => {
-              const option = document.createElement("option");
-              option.value = header;
-              option.textContent = header;
-              
-              // New logic to preserve the user's selection
-              if (lastSelectedColumn && header === lastSelectedColumn) {
-                  option.selected = true;
-              } else if (!lastSelectedColumn && hasNumericColumn && header === defaultNumericColumn) {
-                  // Fallback to default if no previous selection
-                  option.selected = true;
-              }
-              
-              columnSelect.appendChild(option);
-          });
         }
+        
+        headers.forEach(header => {
+          const option = document.createElement("option");
+          option.value = header;
+          option.textContent = header;
+          
+          // New logic to preserve the user's selection
+          if (lastSelectedColumn && header === lastSelectedColumn) {
+            option.selected = true;
+          } else if (!lastSelectedColumn && hasNumericColumn && header === defaultNumericColumn) {
+            // Fallback to default if no previous selection
+            option.selected = true;
+          }
+          columnSelect.appendChild(option);
+        });
+      }
     }
 
     // New function to toggle visibility of the column selector
     function toggleColumnSearch() {
-        const columnSelector = document.getElementById("columnSelector");
-        const isChecked = document.getElementById("columnWiseSearchToggle").checked;
-        if (isChecked) {
-            columnSelector.classList.remove("hidden");
-        } else {
-            columnSelector.classList.add("hidden");
-        }
+      const columnSelector = document.getElementById("columnSelector");
+      const isChecked = document.getElementById("columnWiseSearchToggle").checked;
+      if (isChecked) {
+        columnSelector.classList.remove("hidden");
+      } else {
+        columnSelector.classList.add("hidden");
+      }
     }
 
     async function getClientIP() {
-      try { 
-        const response = await fetch("https://api.ipify.org?format=json"); 
-        const data = await response.json(); 
-        return data.ip; 
-      } catch (e) { 
-        return "IP not available"; 
+      try {
+        const response = await fetch("https://api.ipify.org?format=json");
+        const data = await response.json();
+        return data.ip;
+      } catch (e) {
+        console.error("Could not fetch IP address:", e);
+        return "N/A";
       }
     }
     
-    function getDeviceName() { 
-      return navigator.userAgent || "Device name not available"; 
+    function formatDuration(seconds) {
+      if (seconds < 60) return `${seconds} sec`;
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+      if (minutes < 60) return `${minutes} min ${remainingSeconds} sec`;
+      const hours = Math.floor(minutes / 60);
+      const remainingMinutes = minutes % 60;
+      return `${hours} hr ${remainingMinutes} min`;
     }
 
     async function performSearch() {
-      // Check if user is logged in
-      if (!currentUserName) {
-        alert("Please enter your name to search.");
+      const searchText = document.getElementById("searchInput").value.trim();
+      if (!searchText) {
+        showCustomAlert("Please enter a search keyword.");
         return;
       }
       
-      // Store the current column selection before reloading data
-      const lastSelectedColumn = document.getElementById("searchColumnSelect").value;
+      // No need to check for excelData.length === 0 here, as the file is already loaded
+      // by the updateSelectedFilesDisplay function when the user selects a file.
 
-      // First load the selected files
-      await loadSelectedExcelFiles(lastSelectedColumn);
+      // Update search count and last search for the current user
+      userSearchCount++;
+      userLastSearch = searchText;
       
-      const input = document.getElementById("searchInput").value.trim();
-      const resultText = document.getElementById("resultText");
-      const resultsContainer = document.getElementById("results");
-      const isColumnWise = document.getElementById("columnWiseSearchToggle").checked;
-      const searchType = document.getElementById("searchTypeSelect").value;
-      const searchColumn = document.getElementById("searchColumnSelect").value;
-      
-      if (!input) { 
-        resultText.innerHTML = "<p>Please type something to search.</p>"; 
-        resultsContainer.classList.remove("hidden"); 
-        document.getElementById("totalMatches").innerText = "0"; 
-        document.getElementById("perTermMatches").innerText = ""; 
-        return; 
-      }
-
-      const terms = input.split(",").map(term => term.trim().toLowerCase());
-      
-      if (excelData.length === 0) { 
-        resultText.innerHTML = "<p>No data loaded from GitHub.</p>"; 
-        resultsContainer.classList.remove("hidden"); 
-        return; 
-      }
+      const searchTerms = searchText.split(',').map(term => term.trim().toLowerCase());
+      const searchType = document.getElementById('searchTypeSelect').value;
+      const isColumnWise = document.getElementById('columnWiseSearchToggle').checked;
+      const searchColumn = isColumnWise ? document.getElementById('searchColumnSelect').value : null;
 
       currentResults = [];
-      let totalMatches = 0;
-      const matchesPerTerm = new Map();
-      let lineNo = 1;
+      const perTermMatches = {};
+      const highlightMap = {};
+
+      searchTerms.forEach((term, index) => {
+        perTermMatches[term] = 0;
+        highlightMap[term] = highlightColors[index % highlightColors.length];
+      });
+
+      const allHeaders = Object.keys(excelData[0]).filter(key => key !== '__sourceFile');
+      currentHeaders = allHeaders;
 
       excelData.forEach(row => {
-        let rowMatched = false;
-        let formattedRow = { lineNo: lineNo };
-        let rowData = {};
+        let isMatch = false;
+        let matchedTerms = new Set();
+        const rowData = { ...row };
 
-        // Add line number to row data
-        rowData['Line No'] = lineNo;
-        
-        // Use nickname if available, otherwise use filename
-        const sourceFileName = row.__sourceFile || 'Unknown';
-        const displaySource = fileNicknames[sourceFileName] || sourceFileName;
-        rowData['Source File'] = displaySource;
-        
-        Object.keys(row).forEach(key => {
-          // Skip the internal source file property
-          if (key === '__sourceFile') return;
-          
-          let cell = String(row[key] || "");
-          let originalCell = cell;
-          
-          // Apply search logic based on options
-          let cellMatches = false;
-          
-          if (isColumnWise && key !== searchColumn) {
-              // If column-wise and not the selected column, no match
-              cellMatches = false;
-          } else {
-              terms.forEach((term, idx) => {
-                  let regex;
-                  switch (searchType) {
-                      case 'exact':
-                          regex = new RegExp(`^${term}$`, "i");
-                          break;
-                      case 'startsWith':
-                          regex = new RegExp(`^${term}`, "i");
-                          break;
-                      case 'endsWith':
-                          regex = new RegExp(`${term}$`, "i");
-                          break;
-                      case 'contains':
-                      default:
-                          regex = new RegExp(`(${term})`, "gi");
-                          break;
-                  }
-                  
-                  if (regex.test(cell)) {
-                      cellMatches = true;
-                      rowMatched = true; // Mark the row as matched
-                      
-                      // Use a function for replacement to avoid issues with special regex characters like '$'
-                      cell = cell.replace(regex, (match) => `<span class='${highlightColors[idx % highlightColors.length]}'>${match}</span>`);
+        // Determine which columns to search based on user's choice
+        const searchHeaders = isColumnWise && searchColumn ? [searchColumn] : allHeaders;
 
-                      matchesPerTerm.set(term, (matchesPerTerm.get(term) || 0) + 1);
-                      totalMatches++;
-                  }
-              });
-          }
-          
-          rowData[key] = cell;
-          formattedRow[key] = originalCell; // Store original value for sorting
-        });
-        
-        if (rowMatched) {
-          currentResults.push({ display: rowData, sortData: formattedRow, lineNo: lineNo });
-          lineNo++;
+        for (const header of searchHeaders) {
+          const cellValue = String(row[header]).toLowerCase();
+          searchTerms.forEach(term => {
+            let match = false;
+            switch (searchType) {
+              case 'exact':
+                match = cellValue === term;
+                break;
+              case 'startsWith':
+                match = cellValue.startsWith(term);
+                break;
+              case 'endsWith':
+                match = cellValue.endsWith(term);
+                break;
+              case 'contains':
+              default:
+                match = cellValue.includes(term);
+                break;
+            }
+            if (match) {
+              isMatch = true;
+              matchedTerms.add(term);
+              const highlightClass = highlightMap[term];
+              // Use regex to wrap matched text
+              const regex = new RegExp(`(${term})`, 'gi');
+              const highlightedValue = String(row[header]).replace(regex, `<span class="${highlightClass}">$1</span>`);
+              rowData[header] = highlightedValue;
+            }
+          });
+        }
+
+        if (isMatch) {
+          currentResults.push(rowData);
+          matchedTerms.forEach(term => {
+            perTermMatches[term]++;
+          });
         }
       });
 
-      document.getElementById("totalMatches").innerText = currentResults.length; // Count of matching rows
-
-      if (matchesPerTerm.size > 0) {
-        const termStrings = [];
-        terms.forEach((term, idx) => {
-          const colorClass = highlightColors[idx % highlightColors.length];
-          termStrings.push(`<span class='${colorClass}'><b>${term}</b></span>: ${matchesPerTerm.get(term) || 0}`);
-        });
-        document.getElementById("perTermMatches").innerHTML = "Matches per keyword: " + termStrings.join(", ");
-      } else { 
-        document.getElementById("perTermMatches").innerHTML = "No keywords matched."; 
-      }
-
-      renderResultsTable();
-      resultsContainer.classList.remove("hidden");
-
-      const ip = await getClientIP();
-      const device = getDeviceName();
-      searchLogs.push({ user: currentUserName, ip, device, time: new Date().toLocaleString(), query: input });
+      renderResults(currentResults, currentHeaders);
       
-      // Update user search stats
-      userSearchCount++;
-      userLastSearch = input;
+      document.getElementById("totalMatches").innerText = currentResults.length;
+      document.getElementById("perTermMatches").innerText = "Matches per term: " + Object.entries(perTermMatches).map(([term, count]) => `${term} (${count})`).join(', ');
+      document.getElementById("results").classList.remove("hidden");
     }
 
-    function renderResultsTable() {
-      const resultText = document.getElementById("resultText");
-      
-      if (currentResults.length === 0) {
-        resultText.innerHTML = "<p>No matches found.</p>";
+    function renderResults(results, headers) {
+      const resultDiv = document.getElementById("resultText");
+      if (results.length === 0) {
+        resultDiv.innerHTML = "<p>No results found.</p>";
         return;
       }
+
+      // Create the table structure
+      const table = document.createElement("table");
+      table.id = "searchResultsTable";
+      const thead = document.createElement("thead");
+      const tbody = document.createElement("tbody");
       
-      // Get column headers from first result, including Source File
-      const headers = ['Line No', 'Source File', ...Object.keys(currentResults[0].sortData)
-        .filter(key => key !== 'lineNo' && key !== '__sourceFile')];
+      // Filter headers based on visibleColumns
+      const displayHeaders = headers.filter(header => visibleColumns.includes(header));
       
-      let tableHtml = `<table><thead><tr>`;
-      headers.forEach(header => {
-        const isSorted = header === sortColumn;
-        const sortClass = isSorted ? (sortDirection === 'asc' ? 'asc' : 'desc') : '';
-        tableHtml += `<th class="${sortClass}" onclick="sortTable('${header}')">${header}</th>`;
+      // Create table header
+      const headerRow = document.createElement("tr");
+      displayHeaders.forEach(header => {
+        const th = document.createElement("th");
+        th.textContent = header;
+        th.onclick = () => sortTable(header);
+        headerRow.appendChild(th);
       });
-      tableHtml += `</tr></thead><tbody>`;
-      
-      currentResults.forEach((result) => {
-        tableHtml += `<tr>`;
-        headers.forEach(header => {
-          if (header === 'Line No') {
-            tableHtml += `<td>${result.lineNo}</td>`;
-          } else if (header === 'Source File') {
-            tableHtml += `<td>${result.display['Source File'] || ''}</td>`;
-          } else {
-            tableHtml += `<td>${result.display[header] || ''}</td>`;
-          }
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      // Create table body
+      results.forEach(row => {
+        const tr = document.createElement("tr");
+        displayHeaders.forEach(header => {
+          const td = document.createElement("td");
+          td.innerHTML = row[header] || ''; // Use innerHTML to render highlights
+          tr.appendChild(td);
         });
-        tableHtml += `</tr>`;
+        tbody.appendChild(tr);
       });
+      table.appendChild(tbody);
       
-      tableHtml += `</tbody></table>`;
-      resultText.innerHTML = tableHtml;
-
-      // Store the headers for future use in search logic
-      currentHeaders = headers;
+      resultDiv.innerHTML = "";
+      resultDiv.appendChild(table);
     }
-
+    
     function sortTable(column) {
       if (sortColumn === column) {
-        // Toggle direction if same column clicked again
         sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
       } else {
         sortColumn = column;
         sortDirection = 'asc';
       }
       
-      currentResults.sort((a, b) => {
-        let valueA, valueB;
+      const table = document.getElementById('searchResultsTable');
+      const tbody = table.querySelector('tbody');
+      const rows = Array.from(tbody.rows);
+      
+      // Get the index of the column to sort
+      const headers = Array.from(table.querySelectorAll('th')).map(th => th.textContent);
+      const columnIndex = headers.indexOf(column);
+      
+      rows.sort((a, b) => {
+        const aText = a.cells[columnIndex].textContent.toLowerCase();
+        const bText = b.cells[columnIndex].textContent.toLowerCase();
         
-        if (column === 'Line No') {
-          valueA = a.lineNo;
-          valueB = b.lineNo;
-        } else if (column === 'Source File') {
-            valueA = a.display['Source File'] || '';
-            valueB = b.display['Source File'] || '';
+        if (sortDirection === 'asc') {
+          return aText.localeCompare(bText);
         } else {
-          valueA = a.sortData[column] || '';
-          valueB = b.sortData[column] || '';
+          return bText.localeCompare(aText);
         }
-        
-        // Convert to numbers if possible for proper numeric sorting
-        if (!isNaN(valueA) && !isNaN(valueB) && valueA !== '' && valueB !== '') {
-          valueA = parseFloat(valueA);
-          valueB = parseFloat(valueB);
-        }
-        
-        if (valueA < valueB) return sortDirection === 'asc' ? -1 : 1;
-        if (valueA > valueB) return sortDirection === 'asc' ? 1 : -1;
-        return 0;
       });
       
-      renderResultsTable();
-    }
-
-    function exportToExcel() { 
-      if (currentResults.length === 0) { 
-        alert("No results to export."); 
-        return; 
-      } 
-      
-      const workbook = XLSX.utils.book_new(); 
-      const headers = ['Line No', 'Source File', ...Object.keys(currentResults[0].sortData)
-        .filter(key => key !== 'lineNo' && key !== '__sourceFile')];
-      
-      // Prepare data for export (using original values without HTML formatting)
-      const exportData = currentResults.map(result => {
-        const row = {
-          'Line No': result.lineNo,
-          'Source File': result.display['Source File'] || ''
-        };
-        
-        headers.forEach(header => {
-          if (header !== 'Line No' && header !== 'Source File') {
-            // Remove HTML tags for clean export
-            row[header] = String(result.sortData[header] || '').replace(/<[^>]*>/g, '').replace(/\$/g, '');
-          }
-        });
-        return row;
-      });
-      
-      const worksheet = XLSX.utils.json_to_sheet(exportData);
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Search Results"); 
-      XLSX.writeFile(workbook, "search_results.xlsx"); 
-    }
-
-    function printResults() { 
-      const printWindow = window.open("", "", "width=800,height=600"); 
-      const content = document.getElementById("resultText").innerHTML; 
-      printWindow.document.write(`<html><head><title>Search Results</title><style>table { width: 100%; border-collapse: collapse; margin-bottom: 10px; } th, td { border: 1px solid #ddd; padding: 12px; text-align: left; } th { background-color: #e0f0ff; font-weight: bold; } .highlight-0 { background-color: #FFFF00; font-weight: bold; } .highlight-1 { background-color: #00FF00; font-weight: bold; } .highlight-2 { background-color: #00FFFF; font-weight: bold; } .highlight-3 { background-color: #FF00FF; font-weight: bold; color: white; } .highlight-4 { background-color: #FF8000; font-weight: bold; } .highlight-5 { background-color: #FF0080; font-weight: bold; color: white; }</style></head><body><h3>Search Results</h3>${content}</body></html>`); 
-      printWindow.document.close(); 
-      printWindow.focus(); 
-      printWindow.print(); 
-    }
-
-    function checkAdminLogin() { 
-      const user = document.getElementById("adminUser").value.trim(); 
-      const pass = document.getElementById("adminPass").value.trim(); 
-      
-      // Case-insensitive username check for "shakeel"
-      if (user.toLowerCase() === "shakeel" && pass === "9332") { 
-        document.getElementById("adminLogin").classList.add("hidden"); 
-        document.getElementById("adminPanel").classList.remove("hidden"); 
-        loadLogs(); 
-        renderFileNicknameManager();
-      } else { 
-        alert("Invalid credentials!"); 
-      } 
-    }
-
-    function formatDuration(seconds) {
-      if (!seconds) return "N/A";
-      
-      const hours = Math.floor(seconds / 3600);
-      const minutes = Math.floor((seconds % 3600) / 60);
-      const secs = seconds % 60;
-      
-      if (hours > 0) {
-        return `${hours}h ${minutes}m ${secs}s`;
-      } else if (minutes > 0) {
-        return `${minutes}m ${secs}s`;
-      } else {
-        return `${secs}s`;
+      // Clear and re-append sorted rows
+      while (tbody.firstChild) {
+        tbody.removeChild(tbody.firstChild);
       }
+      rows.forEach(row => tbody.appendChild(row));
+      
+      // Update header indicators
+      const allHeaders = table.querySelectorAll('th');
+      allHeaders.forEach(th => {
+        th.classList.remove('asc', 'desc');
+        if (th.textContent === column) {
+          th.classList.add(sortDirection);
+        }
+      });
     }
 
-    function loadLogs() { 
-      const logTable = document.getElementById("logTable"); 
-      logTable.innerHTML = ""; 
+    function exportToExcel() {
+      if (currentResults.length === 0) {
+        showCustomAlert("No search results to export.");
+        return;
+      }
+
+      // Create a temporary table with the visible columns and data, removing HTML
+      const exportData = currentResults.map(row => {
+        const newRow = {};
+        visibleColumns.forEach(header => {
+          const cellContent = row[header] || '';
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = cellContent;
+          newRow[header] = tempDiv.textContent || tempDiv.innerText;
+        });
+        return newRow;
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Search Results");
+      XLSX.writeFile(workbook, "search_results.xlsx");
+    }
+
+    function printResults() {
+        if (currentResults.length === 0) {
+          showCustomAlert("No search results to print.");
+          return;
+        }
+
+        // Prepare a new table for printing that only contains visible columns
+        const printTableContainer = document.getElementById("printTableContainer");
+        printTableContainer.innerHTML = "";
+        
+        const printTable = document.createElement("table");
+        const thead = document.createElement("thead");
+        const tbody = document.createElement("tbody");
+
+        // Create headers
+        const headerRow = document.createElement("tr");
+        visibleColumns.forEach(header => {
+            const th = document.createElement("th");
+            th.textContent = header;
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+
+        // Create rows
+        currentResults.forEach(row => {
+            const tr = document.createElement("tr");
+            visibleColumns.forEach(header => {
+                const td = document.createElement("td");
+                const cellContent = row[header] || '';
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = cellContent;
+                td.textContent = tempDiv.textContent || tempDiv.innerText;
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+
+        printTable.appendChild(thead);
+        printTable.appendChild(tbody);
+        printTableContainer.appendChild(printTable);
+
+        // Populate print-only details
+        document.getElementById("printQuery").textContent = document.getElementById("searchInput").value;
+        document.getElementById("printMatches").textContent = document.getElementById("totalMatches").textContent;
+
+        window.print();
+    }
+    
+    // Custom Alert/Confirm functions
+    function showCustomAlert(message) {
+      const modal = document.createElement('div');
+      modal.style = "position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px; background-color: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 1000; text-align: center;";
+      modal.innerHTML = `
+        <p>${message}</p>
+        <button onclick="this.parentElement.remove()">OK</button>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    function showCustomConfirm(message, onConfirm) {
+      const modal = document.createElement('div');
+      modal.style = "position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px; background-color: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 1000; text-align: center;";
+      modal.innerHTML = `
+        <p>${message}</p>
+        <button onclick="this.parentElement.remove(); ${onConfirm.name}();">Yes</button>
+        <button onclick="this.parentElement.remove()">No</button>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    function showColumnCustomizer() {
+      const customizer = document.getElementById('columnCustomizer');
+      const checkboxesDiv = document.getElementById('columnCheckboxes');
+      checkboxesDiv.innerHTML = '';
+      
+      if (currentHeaders.length === 0) {
+        checkboxesDiv.innerHTML = "<p>No headers available. Perform a search first.</p>";
+        customizer.classList.remove('hidden');
+        return;
+      }
+
+      currentHeaders.forEach(header => {
+        const label = document.createElement('label');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = header;
+        input.checked = visibleColumns.includes(header);
+        label.appendChild(input);
+        label.append(header);
+        checkboxesDiv.appendChild(label);
+      });
+
+      customizer.classList.remove('hidden');
+    }
+
+    function applyColumnVisibility() {
+      const checkboxes = document.querySelectorAll('#columnCheckboxes input[type="checkbox"]');
+      visibleColumns = [];
+      checkboxes.forEach(checkbox => {
+        if (checkbox.checked) {
+          visibleColumns.push(checkbox.value);
+        }
+      });
+      
+      if (visibleColumns.length === 0) {
+        showCustomAlert("You must have at least one column visible.");
+        // Revert to old state
+        visibleColumns = currentHeaders;
+        renderResults(currentResults, currentHeaders);
+        document.getElementById('columnCustomizer').classList.add('hidden');
+        return;
+      }
+      
+      renderResults(currentResults, currentHeaders);
+      document.getElementById('columnCustomizer').classList.add('hidden');
+    }
+
+    function showAllColumns() {
+      visibleColumns = currentHeaders.slice();
+      const checkboxes = document.querySelectorAll('#columnCheckboxes input[type="checkbox"]');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = true;
+      });
+      applyColumnVisibility();
+    }
+    
+    // Render the log table in the admin panel
+    function loadLogs() {
+      const logTable = document.getElementById("logTable");
+      logTable.innerHTML = "";
       
       userSessions.forEach((session, index) => {
         const loginTime = session.loginTime ? session.loginTime.toLocaleString() : "N/A";
@@ -972,11 +1053,9 @@
         const searchCount = session.searchCount || 0;
         const lastSearch = session.lastSearch || "No searches";
         
-        const isSelected = selectedLogs.has(index);
-        
         logTable.innerHTML += `
-          <tr class="log-row ${isSelected ? 'selected' : ''}">
-            <td><input type="checkbox" class="log-checkbox" data-index="${index}" ${isSelected ? 'checked' : ''} onchange="toggleLogSelection(this, ${index})"></td>
+          <tr class="log-row">
+            <td><input type="checkbox" class="log-checkbox" data-index="${index}" onchange="toggleLogSelection(this, ${index})"></td>
             <td>${session.user}</td>
             <td>${loginTime}</td>
             <td>${logoutTime}</td>
@@ -1017,6 +1096,11 @@
       document.getElementById("deletePassword").addEventListener("keypress", function(e) { 
         if (e.key === "Enter") deleteAllLogs(); 
       }); 
+      
+      // Initial call to load the first file when the page loads, if a file is selected by default
+      if (document.getElementById("fileSelect").value !== "") {
+          updateSelectedFilesDisplay();
+      }
     };
   </script>
 </body>
