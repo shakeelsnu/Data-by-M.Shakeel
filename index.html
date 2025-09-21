@@ -44,6 +44,9 @@
     .table-container { position: relative; }
     #selectAllLogs { margin-right: 10px; }
     .selected-files { margin-top: 10px; font-style: italic; color: #555; }
+    .search-options { display: flex; align-items: center; margin: 10px 0; }
+    .search-options > div { margin-right: 20px; }
+    .search-options label { margin-left: 5px; }
   </style>
 </head>
 <body>
@@ -74,6 +77,28 @@
     </div>
     
     <input type="text" id="searchInput" placeholder="Search keywords separated by commas..." />
+    
+    <!-- New search options -->
+    <div class="search-options">
+        <div>
+            <input type="checkbox" id="columnWiseSearchToggle" onchange="toggleColumnSearch()">
+            <label for="columnWiseSearchToggle">Column-wise search</label>
+        </div>
+        <div>
+            <label for="searchTypeSelect">Search type:</label>
+            <select id="searchTypeSelect">
+                <option value="contains">Contains</option>
+                <option value="exact">Exact</option>
+                <option value="startsWith">Starts with</option>
+                <option value="endsWith">Ends with</option>
+            </select>
+        </div>
+        <div id="columnSelector" class="hidden">
+            <label for="searchColumnSelect">Search column:</label>
+            <select id="searchColumnSelect"></select>
+        </div>
+    </div>
+
     <button onclick="performSearch()">Search</button>
     <button onclick="toggleAdminLogin()">Admin Mode</button>
     <button onclick="logout()" style="background-color: #ff6b6b;">Logout</button>
@@ -170,6 +195,7 @@
     let sortColumn = null;
     let sortDirection = 'asc';
     let selectedLogs = new Set();
+    let currentHeaders = [];
 
     // Load file nicknames from localStorage or initialize empty object
     function loadFileNicknames() {
@@ -539,7 +565,8 @@
       }
     }
 
-    async function loadSelectedExcelFiles() {
+    // loadSelectedExcelFiles now accepts an optional parameter to preserve the column selection
+    async function loadSelectedExcelFiles(lastSelectedColumn = null) {
       const fileSelect = document.getElementById("fileSelect");
       const selectedValue = fileSelect.value;
       
@@ -581,6 +608,60 @@
       document.getElementById("excelUploadDate").innerText = loadedNames.length > 0 ? 
         loadedNames.join(", ") + " loaded at " + new Date().toLocaleString() : 
         "❌ No Excel files found or selected";
+
+      // After loading data, populate the column selector. Pass the last selected column.
+      if (excelData.length > 0) {
+          const headers = Object.keys(excelData[0]).filter(key => key !== '__sourceFile');
+          populateColumnSelector(headers, lastSelectedColumn);
+      } else {
+          populateColumnSelector([]);
+      }
+    }
+
+    // populateColumnSelector now accepts the last selected column as a parameter
+    function populateColumnSelector(headers, lastSelectedColumn) {
+        const columnSelect = document.getElementById("searchColumnSelect");
+        columnSelect.innerHTML = ""; // Clear existing options
+        if (headers.length > 0) {
+          let hasNumericColumn = false;
+          let defaultNumericColumn = null;
+          
+          // Find the first column with a numeric value
+          for (const header of headers) {
+              if (excelData.length > 0 && !isNaN(parseFloat(excelData[0][header]))) {
+                  defaultNumericColumn = header;
+                  hasNumericColumn = true;
+                  break;
+              }
+          }
+
+          headers.forEach(header => {
+              const option = document.createElement("option");
+              option.value = header;
+              option.textContent = header;
+              
+              // New logic to preserve the user's selection
+              if (lastSelectedColumn && header === lastSelectedColumn) {
+                  option.selected = true;
+              } else if (!lastSelectedColumn && hasNumericColumn && header === defaultNumericColumn) {
+                  // Fallback to default if no previous selection
+                  option.selected = true;
+              }
+              
+              columnSelect.appendChild(option);
+          });
+        }
+    }
+
+    // New function to toggle visibility of the column selector
+    function toggleColumnSearch() {
+        const columnSelector = document.getElementById("columnSelector");
+        const isChecked = document.getElementById("columnWiseSearchToggle").checked;
+        if (isChecked) {
+            columnSelector.classList.remove("hidden");
+        } else {
+            columnSelector.classList.add("hidden");
+        }
     }
 
     async function getClientIP() {
@@ -604,12 +685,18 @@
         return;
       }
       
+      // Store the current column selection before reloading data
+      const lastSelectedColumn = document.getElementById("searchColumnSelect").value;
+
       // First load the selected files
-      await loadSelectedExcelFiles();
+      await loadSelectedExcelFiles(lastSelectedColumn);
       
       const input = document.getElementById("searchInput").value.trim();
       const resultText = document.getElementById("resultText");
       const resultsContainer = document.getElementById("results");
+      const isColumnWise = document.getElementById("columnWiseSearchToggle").checked;
+      const searchType = document.getElementById("searchTypeSelect").value;
+      const searchColumn = document.getElementById("searchColumnSelect").value;
       
       if (!input) { 
         resultText.innerHTML = "<p>Please type something to search.</p>"; 
@@ -652,15 +739,43 @@
           let cell = String(row[key] || "");
           let originalCell = cell;
           
-          terms.forEach((term, idx) => {
-            const regex = new RegExp(`(${term})`, "gi");
-            if (regex.test(cell)) {
-              rowMatched = true;
-              cell = cell.replace(regex, `<span class='${highlightColors[idx % highlightColors.length]}'>$1</span>`);
-              matchesPerTerm.set(term, (matchesPerTerm.get(term) || 0) + 1);
-              totalMatches++;
-            }
-          });
+          // Apply search logic based on options
+          let cellMatches = false;
+          
+          if (isColumnWise && key !== searchColumn) {
+              // If column-wise and not the selected column, no match
+              cellMatches = false;
+          } else {
+              terms.forEach((term, idx) => {
+                  let regex;
+                  switch (searchType) {
+                      case 'exact':
+                          regex = new RegExp(`^${term}$`, "i");
+                          break;
+                      case 'startsWith':
+                          regex = new RegExp(`^${term}`, "i");
+                          break;
+                      case 'endsWith':
+                          regex = new RegExp(`${term}$`, "i");
+                          break;
+                      case 'contains':
+                      default:
+                          regex = new RegExp(`(${term})`, "gi");
+                          break;
+                  }
+                  
+                  if (regex.test(cell)) {
+                      cellMatches = true;
+                      rowMatched = true; // Mark the row as matched
+                      
+                      // Use a function for replacement to avoid issues with special regex characters like '$'
+                      cell = cell.replace(regex, (match) => `<span class='${highlightColors[idx % highlightColors.length]}'>${match}</span>`);
+
+                      matchesPerTerm.set(term, (matchesPerTerm.get(term) || 0) + 1);
+                      totalMatches++;
+                  }
+              });
+          }
           
           rowData[key] = cell;
           formattedRow[key] = originalCell; // Store original value for sorting
@@ -672,13 +787,13 @@
         }
       });
 
-      document.getElementById("totalMatches").innerText = totalMatches;
+      document.getElementById("totalMatches").innerText = currentResults.length; // Count of matching rows
 
       if (matchesPerTerm.size > 0) {
         const termStrings = [];
-        matchesPerTerm.forEach((count, term) => {
-          const colorClass = highlightColors[terms.indexOf(term) % highlightColors.length];
-          termStrings.push(`<span class='${colorClass}'><b>${term}</b></span>: ${count}`);
+        terms.forEach((term, idx) => {
+          const colorClass = highlightColors[idx % highlightColors.length];
+          termStrings.push(`<span class='${colorClass}'><b>${term}</b></span>: ${matchesPerTerm.get(term) || 0}`);
         });
         document.getElementById("perTermMatches").innerHTML = "Matches per keyword: " + termStrings.join(", ");
       } else { 
@@ -733,6 +848,9 @@
       
       tableHtml += `</tbody></table>`;
       resultText.innerHTML = tableHtml;
+
+      // Store the headers for future use in search logic
+      currentHeaders = headers;
     }
 
     function sortTable(column) {
@@ -792,7 +910,7 @@
         headers.forEach(header => {
           if (header !== 'Line No' && header !== 'Source File') {
             // Remove HTML tags for clean export
-            row[header] = String(result.sortData[header] || '').replace(/<[^>]*>/g, '');
+            row[header] = String(result.sortData[header] || '').replace(/<[^>]*>/g, '').replace(/\$/g, '');
           }
         });
         return row;
